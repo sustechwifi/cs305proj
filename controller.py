@@ -23,12 +23,14 @@ class ControllerApp(app_manager.RyuApp):
         """
         Event handler indicating a switch has come online.
         """
+        pass
 
     @set_ev_cls(event.EventSwitchLeave)
     def handle_switch_delete(self, ev):
         """
         Event handler indicating a switch has been removed
         """
+        pass
 
 
     @set_ev_cls(event.EventHostAdd)
@@ -38,6 +40,7 @@ class ControllerApp(app_manager.RyuApp):
         This handler is automatically triggered when a host sends an ARP response.
         """ 
         # TODO:  Update network topology and flow rules
+        pass
 
     @set_ev_cls(event.EventLinkAdd)
     def handle_link_add(self, ev):
@@ -45,6 +48,7 @@ class ControllerApp(app_manager.RyuApp):
         Event handler indicating a link between two switches has been added
         """
         # TODO:  Update network topology and flow rules
+        pass
 
     @set_ev_cls(event.EventLinkDelete)
     def handle_link_delete(self, ev):
@@ -52,7 +56,7 @@ class ControllerApp(app_manager.RyuApp):
         Event handler indicating when a link between two switches has been deleted
         """
         # TODO:  Update network topology and flow rules
-   
+        pass
         
 
     @set_ev_cls(event.EventPortModify)
@@ -62,7 +66,7 @@ class ControllerApp(app_manager.RyuApp):
         This includes links for hosts as well as links between switches.
         """
         # TODO:  Update network topology and flow rules
-
+        pass
 
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
