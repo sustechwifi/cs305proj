@@ -18,6 +18,8 @@ class ControllerApp(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(ControllerApp, self).__init__(*args, **kwargs)
 
+        # hello
+
     @set_ev_cls(event.EventSwitchEnter)
     def handle_switch_add(self, ev):
         """
