@@ -17,14 +17,17 @@ class ControllerApp(app_manager.RyuApp):
 
     def __init__(self, *args, **kwargs):
         super(ControllerApp, self).__init__(*args, **kwargs)
-
-        # hello
+        self.network_topology = {}  # Store network topology information
 
     @set_ev_cls(event.EventSwitchEnter)
     def handle_switch_add(self, ev):
+   
         """
         Event handler indicating a switch has come online.
         """
+        switch = ev.switch
+        self.network_topology[switch.dp.id] = switch
+        # TODO: Update flow rules for the new switch
         pass
 
     @set_ev_cls(event.EventSwitchLeave)
@@ -32,16 +35,20 @@ class ControllerApp(app_manager.RyuApp):
         """
         Event handler indicating a switch has been removed
         """
+        switch = ev.switch
+        del self.network_topology[switch.dp.id]
+        # TODO: Remove flow rules associated with the removed switch
         pass
 
 
     @set_ev_cls(event.EventHostAdd)
     def handle_host_add(self, ev):
         """
-        Event handler indiciating a host has joined the network
+        Event handler indicating a host has joined the network
         This handler is automatically triggered when a host sends an ARP response.
-        """ 
-        # TODO:  Update network topology and flow rules
+        """
+        host = ev.host
+        # TODO: Update network topology with the new host information
         pass
 
     @set_ev_cls(event.EventLinkAdd)
@@ -49,7 +56,8 @@ class ControllerApp(app_manager.RyuApp):
         """
         Event handler indicating a link between two switches has been added
         """
-        # TODO:  Update network topology and flow rules
+        link = ev.link
+        # TODO: Update network topology with the new link information
         pass
 
     @set_ev_cls(event.EventLinkDelete)
@@ -57,9 +65,9 @@ class ControllerApp(app_manager.RyuApp):
         """
         Event handler indicating when a link between two switches has been deleted
         """
-        # TODO:  Update network topology and flow rules
+        link = ev.link
+        # TODO: Update network topology to remove the link
         pass
-        
 
     @set_ev_cls(event.EventPortModify)
     def handle_port_modify(self, ev):
@@ -67,9 +75,9 @@ class ControllerApp(app_manager.RyuApp):
         Event handler for when any switch port changes state.
         This includes links for hosts as well as links between switches.
         """
-        # TODO:  Update network topology and flow rules
+        port = ev.port
+        # TODO: Handle port modification event in network topology
         pass
-
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
@@ -80,11 +88,13 @@ class ControllerApp(app_manager.RyuApp):
             pkt_dhcp = pkt.get_protocols(dhcp.dhcp)
             inPort = msg.in_port
             if not pkt_dhcp:
-                # TODO: handle other protocols like ARP 
+                print(pkt_dhcp)
+                print("not dhcp, not implemented yet")
+                # TODO: Handle other protocols like ARP 
                 pass
             else:
+                print("dhcp called")
                 DHCPServer.handle_dhcp(datapath, inPort, pkt)      
             return 
         except Exception as e:
             self.logger.error(e)
-    
