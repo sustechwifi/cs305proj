@@ -60,4 +60,4 @@ def test_case(host_num):
 
 if __name__ == '__main__':
     setLogLevel('info')
-    test_case(2)
+    test_case(15)

@@ -29,7 +29,7 @@ class Config():
 
     # test case 4
     # start = 130
-    # end = 200
+    # end = 140
     # mask = 128
 
     start_ip = f'192.168.1.{start}' # can be modified
@@ -227,7 +227,6 @@ class DHCPServer():
 
         # Get client MAC address and requested IP address
         client_mac = pkt_ethernet.src
-        print(cls.CLIENTS)
         type_msg = pkt_dhcp.options.option_list[0].value
         if type_msg == b'\x03':
             for i in pkt_dhcp.options.option_list:
@@ -242,12 +241,15 @@ class DHCPServer():
             cls._send_packet(datapath, port, res)
  
         elif(type_msg == b'\x01'):
-
             # Assign a new IP address to the client
-            assigned_ip = cls.IP_POOL.pop(0)
-            cls.CLIENTS[client_mac] = assigned_ip
-            res = cls.assemble_offer(pkt, assigned_ip)
-            cls._send_packet(datapath, port, res)
+            if len(cls.IP_POOL) == 0:
+                res = cls.assemble_nak(pkt)
+                cls._send_packet(datapath, port, res)
+            else:    
+                assigned_ip = cls.IP_POOL.pop(0)
+                cls.CLIENTS[client_mac] = assigned_ip
+                res = cls.assemble_offer(pkt, assigned_ip)
+                cls._send_packet(datapath, port, res)
         else:
             print(type_msg)
 
