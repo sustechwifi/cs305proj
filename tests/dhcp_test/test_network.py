@@ -28,18 +28,23 @@ def do_arp_all(net):
 
 
 class TestTopo(Topo):
+
     def __init__(self, **opts):
         Topo.__init__(self, **opts)
-        h1 = self.addHost('h1', ip='no ip defined/8')
-        h2 = self.addHost('h2', ip='no ip defined/8')
-        # h1 = self.addHost('h1')
-        # h2 = self.addHost('h2')
+        # h1 = self.addHost('h1', ip='no ip defined/8')
         s1 = self.addSwitch('s1')
-        self.addLink(h1, s1)
-        self.addLink(h2, s1)
+        # self.addLink(h1, s1)
+        self.datapath = s1
 
-def run_mininet():
+    def add_n_host(self,m):
+        for i in range(1,m+1):
+            h = self.addHost(f'h{i}',ip='no ip defined/8')
+            self.addLink(h,self.datapath)
+
+
+def test_case(host_num):
     topo = TestTopo()
+    topo.add_n_host(host_num)
     net = Mininet(topo=topo, autoSetMacs=True, controller=RemoteController)
     for h in net.hosts:
         disable_ipv6(h)
@@ -55,4 +60,4 @@ def run_mininet():
 
 if __name__ == '__main__':
     setLogLevel('info')
-    run_mininet()
+    test_case(2)

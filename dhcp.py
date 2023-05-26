@@ -22,9 +22,19 @@ sudo env "PATH=$PATH" python test_network.py
 class Config():
     controller_macAddr = '7e:49:b3:f0:f9:99' # don't modify, a dummy mac address for fill the mac enrty
     dns = '8.8.8.8' # don't modify, just for the dns entry
-    start_ip = '192.168.1.2' # can be modified
-    end_ip = '192.168.1.100' # can be modified
-    netmask = '255.255.255.0' # can be modified
+
+    start = 2
+    end = 100
+    mask = 0
+
+    # test case 4
+    # start = 130
+    # end = 200
+    # mask = 128
+
+    start_ip = f'192.168.1.{start}' # can be modified
+    end_ip = f'192.168.1.{end}' # can be modified
+    netmask = f'255.255.255.{mask}' # can be modified
 
     # You may use above attributes to configure your DHCP server.
     # You can also add more attributes like "lease_time" to support bouns function.
@@ -37,7 +47,7 @@ class DHCPServer():
     netmask = Config.netmask
     dns = Config.dns
 
-    IP_POOL = ['192.168.1.{}'.format(i) for i in range(2, 100)]
+    IP_POOL = ['192.168.1.{}'.format(i) for i in range(Config.start, Config.end)]
     CLIENTS = {}
 
     @classmethod
@@ -217,7 +227,7 @@ class DHCPServer():
 
         # Get client MAC address and requested IP address
         client_mac = pkt_ethernet.src
-
+        print(cls.CLIENTS)
         type_msg = pkt_dhcp.options.option_list[0].value
         if type_msg == b'\x03':
             for i in pkt_dhcp.options.option_list:
@@ -226,10 +236,8 @@ class DHCPServer():
          
             # Client has already been assigned the requested IP address or request
             if client_mac in cls.CLIENTS:
-                print("============ sending ack packets ============")
                 res = cls.assemble_ack(pkt, assigned_ip)
             else: 
-                print("============ sending nak packets ============")
                 res = cls.assemble_nak(pkt)
             cls._send_packet(datapath, port, res)
  
@@ -238,7 +246,6 @@ class DHCPServer():
             # Assign a new IP address to the client
             assigned_ip = cls.IP_POOL.pop(0)
             cls.CLIENTS[client_mac] = assigned_ip
-            print("============== send offer ==============")
             res = cls.assemble_offer(pkt, assigned_ip)
             cls._send_packet(datapath, port, res)
         else:
