@@ -17,6 +17,7 @@ from collections import defaultdict
 
 
 # conda activate cs305
+# sudo mn -c
 # ryu-manager --observe-links controller.py 
 
 # cd ./tests/switching_test/
@@ -118,15 +119,19 @@ class ControllerApp(app_manager.RyuApp):
                             src_mac = self.switch_mac[i]
                             dst_mac = self.switch_mac[j]
                             
+                            switch1 = j
                             print("The distance from host_"+str(src_mac)+" to host_"+str(dst_mac)+" : "+str(len(path)+2))
                             s="Path : host_"
                             s+=str(src_mac)
                             for p in path:
-                                s+=" -> swtich_"
-                                s+=str(p[1])
+                                s+=" -> switch_"
+                                s+=str(p[0])
+                            s+=" -> switch_"
+                            s+=str(switch1)
                             s+=" -> host_"
                             s+=str(dst_mac)                        
                             print(s)
+                            print("\n")
         
 
         pass
@@ -206,6 +211,8 @@ class ControllerApp(app_manager.RyuApp):
         Event handler for when any switch port changes state.
         This includes links for hosts as well as links between switches.
         """
+        port = ev.port
+        print(port)
         # TODO:  Update network topology and flow rules
         pass
 
@@ -238,16 +245,19 @@ class ControllerApp(app_manager.RyuApp):
                         if dst_mac is not None:
                             path = self.dijkstra(self.host_switch[src_ip], self.host_switch[dst_ip])
                             self.add_flow(path,src_ip,dst_ip)
-
+                            switch1 = self.host_switch[dst_ip]
                             print("The distance from host_"+str(src_mac)+" to host_"+str(dst_mac)+" : "+str(len(path)+2))
                             s="Path : host_"
                             s+=str(src_mac)
                             for p in path:
-                                s+=" -> swtich_"
-                                s+=str(p[1])
+                                s+=" -> switch_"
+                                s+=str(p[0])
+                            s+=" -> switch_"
+                            s+=str(switch1)
                             s+=" -> host_"
                             s+=str(dst_mac)                        
                             print(s)
+                            print("\n")
                 pass
             else:
                 DHCPServer.handle_dhcp(datapath, inPort, pkt1)      
