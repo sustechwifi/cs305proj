@@ -1,399 +1,240 @@
 from ryu.base import app_manager
 from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
+from ryu.controller.handler import MAIN_DISPATCHER
 from ryu.controller.handler import set_ev_cls
+from ryu.topology import event
 from ryu.ofproto import ofproto_v1_0
-
-from ryu.topology import event, switches
-import ryu.topology.api as topo
-
-from ryu.lib.packet import packet, ether_types
-from ryu.lib.packet import ethernet, arp, icmp
+from ryu.lib.packet import ether_types, arp
+from ryu.lib.packet import dhcp
+from ryu.lib.packet import ethernet
+from ryu.lib.packet import packet
+from dhcp import DHCPServer
 
 from ofctl_utilis import OfCtl, VLANID_NONE
 
 
-class Device():
-    """Base class to represent an device in the network.
-
-    Any device (switch or host) has a name (used for debugging only)
-    and a set of neighbors.
-    """
-    def __init__(self, name):
-        self.name = name
-        self.neighbors = set()
-
-    def add_neighbor(self, dev):
-        self.neighbors.add(dev)
-
-    # . . .
-
-    def __str__(self):
-        return "{}({})".format(self.__class__.__name__,
-                               self.name)
-
-
-class TMSwitch(Device):
-    """Representation of a switch, extends Device
-
-    This class is a wrapper around the Ryu Switch object,
-    which contains information about the switch's ports
-    """
-
-    def __init__(self, name, switch):
-        super(TMSwitch, self).__init__(name)
-
-        self.switch = switch
-        # TODO:  Add more attributes as necessary
-
-    def get_dpid(self):
-        """Return switch DPID"""
-        return self.switch.dp.id
-
-    def get_ports(self):
-        """Return list of Ryu port objects for this switch
-        """
-        return self.switch.ports
-
-    def get_dp(self):
-        """Return switch datapath object"""
-        return self.switch.dp
-
-    # . . .
-
-
-class TMHost(Device):
-    """Representation of a host, extends Device
-
-    This class is a wrapper around the Ryu Host object,
-    which contains information about the switch port to which
-    the host is connected
-    """
-
-    def __init__(self, name, host):
-        super(TMHost, self).__init__(host)
-
-        self.host = host
-        # TODO:  Add more attributes as necessary
-
-    def get_mac(self):
-        return self.host.mac
-
-    def get_ips(self):
-        return self.host.ipv4
-
-    def get_port(self):
-        """Return Ryu port object for this host"""
-        return self.host.port
-
-    # . . .
-
-
-class TopoManager():
-    """
-    Example class for keeping track of the network topology
-
-    """
-    def __init__(self):
-        # TODO:  Initialize some data structures
-        self.all_devices = []
-        pass
-
-    def add_switch(self, sw):
-        name = "switch_{}".format(sw.dp.id)
-        switch = TMSwitch(name, sw)
-
-        self.all_devices.append(switch)
-
-        # TODO:  Add switch to some data structure(s)
-
-    def add_host(self, h):
-        name = "host_{}".format(h.mac)
-        host = TMHost(name, h)
-
-        self.all_devices.append(host)
-
-        # TODO:  Add host to some data structure(s)
-
-    # . . .
-
 class ControllerApp(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION]
-    flag = True
-
-
-    def update(self):
-        self.switch_to = [[1000000 for i in range(self.switchNum+1)] for i in range(self.switchNum+1)]
-
-        for x in range(1, self.switchNum+1):
-            self.switch_to[x][x] = 0
-        for key in self.mac_mac:
-            macA = key
-            macB = self.mac_mac[key]
-            a = self.sMac_num[macA]
-            b = self.sMac_num[macB]
-            self.switch_to[a][b] = 1
-
-        for k in range(1, self.switchNum+1):
-            for i in range(1, self.switchNum+1):
-                for j in range(1, self.switchNum+1):
-                    if self.switch_to[i][k] + self.switch_to[k][j] < self.switch_to[i][j]:
-                        self.switch_to[i][j] = self.switch_to[i][k] + self.switch_to[k][j]
-        self.set_flowtable()
-        self.print_path()
-
 
     def __init__(self, *args, **kwargs):
         super(ControllerApp, self).__init__(*args, **kwargs)
-
-        self.tm = TopoManager()
-
-    ################################################################################################################
-
         self.switchNum = 0
-
-        self.switch_to = []
-
+        self.s_s = []  # 两个switch之间的距,邻接矩阵
         self.numInfo = []
-
-        self.switch_num_real = {}  #转化交换机序号为真实序号，编程用
+        self.switch_num_real = {}  # 转化交换机序号为真实序号，编程用
         self.switch_real_num = {}  # 转化交换机序号为真实序号，编程用
         self.port = []
-
-        self.hIp_hMac = {}
-        self.hMac_sMac = {}
-        self.sMac_sPort = {}
-
-        self.mac_mac = {}
-
-        self.sMac_num = {}
-        self.hIp_realNum = {}
-
-        self.sId_sWitch = {}  # 交换机id和交换机datapath对应
-
-        self.switch_to.append([])
-
+        self.Hip_Hmac = {}  # host ip->host mac
+        self.Hmac_Smac = {}  # host mac->switch mac
+        self.Smac_Sport = {}  # switch mac->switch port
+        self.mac_mac = {}  # hardware address
+        self.Smac_Sid = {}  # switch mac->switch id
+        self.Hip_Hid = {}  # host ip->host id
+        self.Sid_Sswitch = {}  # switch id->switch
+        self.s_s.append([])
         self.numInfo.append([])
-
         self.leaveSwitchList = []
         self.DelPortList = []
-    ################################################################################################################
-
 
     @set_ev_cls(event.EventSwitchEnter)
     def handle_switch_add(self, ev):
-        """
-        Event handler indicating a switch has come onlin            self.logger.info(paths)e.
-        """
         switch = ev.switch
         dp = switch.dp
-        self.sId_sWitch[dp.id] = dp
-
+        self.Sid_Sswitch[dp.id] = dp
         self.logger.warn("Added Switch switch%d with ports:", switch.dp.id)
 
         self.switchNum += 1
-        self.switch_to.append([])
+        self.s_s.append([])
         self.numInfo.append([])
 
         for port in switch.ports:
             self.logger.warn("\t%d:  %s", port.port_no, port.hw_addr)
-
-            self.sMac_sPort[port.hw_addr] = port.port_no
+            self.Smac_Sport[port.hw_addr] = port.port_no
             self.numInfo[self.switchNum].append(port.hw_addr)
-            self.switch_to[self.switchNum].append(0)
-
-            self.sMac_num[port.hw_addr] = self.switchNum
+            self.s_s[self.switchNum].append(0)
+            self.Smac_Sid[port.hw_addr] = self.switchNum
 
         self.switch_real_num[switch.dp.id] = self.switchNum
         self.switch_num_real[self.switchNum] = switch.dp.id
-        # TODO:  Update network topology and flow rules
-        self.tm.add_switch(switch)
         self.update()
 
     @set_ev_cls(event.EventSwitchLeave)
     def handle_switch_delete(self, ev):
-        """
-        Event handler indicating a switch has been removed
-        """
-        switch = ev.switch
 
+        switch = ev.switch
         self.logger.warn("Removed Switch switch%d with ports:", switch.dp.id)
+
         for port in switch.ports:
             self.logger.warn("\t%d:  %s", port.port_no, port.hw_addr)
 
-        fakeNum = self.switch_real_num[switch.dp.id]
-        self.leaveSwitchList.append(fakeNum)
+        temp_num = self.switch_real_num[switch.dp.id]
+        self.leaveSwitchList.append(temp_num)
 
-        for mac in self.numInfo[fakeNum]:  ####################################################
+        for mac in self.numInfo[temp_num]:
             if mac in self.mac_mac:
                 del self.mac_mac[self.mac_mac[mac]]
                 del self.mac_mac[mac]
 
-        # TODO:  Update network topology and flow rules
         self.update()
 
     @set_ev_cls(event.EventHostAdd)
     def handle_host_add(self, ev):
-        """
-        Event handler indiciating a host has joined the network
-        This handler is automatically triggered when a host sends an ARP response.
-        """
-
 
         host = ev.host
         self.logger.warn("Host Added:  %s (IPs:  %s) on switch%s/%s (%s)",
-                          host.mac, host.ipv4, host.port.dpid, host.port.port_no, host.port.hw_addr)
+                         host.mac, host.ipv4, host.port.dpid, host.port.port_no, host.port.hw_addr)
 
-        # TODO:  Update network topology and flow rules
-
-        self.hIp_hMac[host.ipv4[0]] = host.mac
-        self.hMac_sMac[host.mac] = host.port.hw_addr
-
-        # real = self.switch_real_num[host.port.dpid] ########################################
-        self.hIp_realNum[host.ipv4[0]]= host.port.dpid #####################
-
-
-        self.tm.add_host(host)
+        self.Hip_Hmac[host.ipv4[0]] = host.mac
+        self.Hmac_Smac[host.mac] = host.port.hw_addr
+        self.Hip_Hid[host.ipv4[0]] = host.port.dpid
         self.update()
 
     @set_ev_cls(event.EventLinkAdd)
     def handle_link_add(self, ev):
-        """
-        Event handler indicating a link between two switches has been added
-        """
         link = ev.link
-        src_port = ev.link.src
-        dst_port = ev.link.dst
+        src_port = link.src
+        dst_port = link.dst
         self.logger.warn("Added Link:  switch%s/%s (%s) -> switch%s/%s (%s)",
                          src_port.dpid, src_port.port_no, src_port.hw_addr,
                          dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
-        #########################################################################################################
 
         self.mac_mac[src_port.hw_addr] = dst_port.hw_addr
         self.mac_mac[dst_port.hw_addr] = src_port.hw_addr
-
-
-        #########################################################################################################
-        # TODO:  Update network topology and flow rules
         self.update()
 
     @set_ev_cls(event.EventLinkDelete)
     def handle_link_delete(self, ev):
-        """
-        Event handler indicating when a link between two switches has been deleted
-        """
         link = ev.link
         src_port = link.src
         dst_port = link.dst
 
         self.logger.warn("Deleted Link:  switch%s/%s (%s) -> switch%s/%s (%s)",
-                          src_port.dpid, src_port.port_no, src_port.hw_addr,
-                          dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
-        #########################################################################################################
+                         src_port.dpid, src_port.port_no, src_port.hw_addr,
+                         dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
 
         if src_port.hw_addr in self.mac_mac:
-
             del self.mac_mac[src_port.hw_addr]
         if dst_port.hw_addr in self.mac_mac:
-
             del self.mac_mac[dst_port.hw_addr]
 
-        #########################################################################################################
-        # TODO:  Update network topology and flow rules
         self.update()
 
     @set_ev_cls(event.EventPortModify)
     def handle_port_modify(self, ev):
-        """
-        Event handler for when any switch port changes state.
-        This includes links for hosts as well as links between switches.
-        """
+
         port = ev.port
         self.logger.warn("Port Changed:  switch%s/%s (%s):  %s",
                          port.dpid, port.port_no, port.hw_addr,
                          "UP" if port.is_live() else "DOWN")
-        #########################################################################################################
-        a = self.sMac_num[port.hw_addr]
+
+        a = self.Smac_Sid[port.hw_addr]
 
         if port.hw_addr in self.mac_mac:
-            b = self.sMac_num[self.mac_mac[port.hw_addr]]
+            b = self.Smac_Sid[self.mac_mac[port.hw_addr]]
 
             if port.hw_addr in self.DelPortList:
                 self.DelPortList.remove(port.hw_addr)
-                self.switch_to[a][b] = 1
-                self.switch_to[b][a] = 1
+                self.s_s[a][b] = 1
+                self.s_s[b][a] = 1
             else:
                 self.DelPortList.append(port.hw_addr)
                 if port.hw_addr in self.mac_mac:
-                    # del self.mac_mac[self.mac_mac[port.hw_addr]]
-                    # del self.mac_mac[port.hw_addr]
-                    self.switch_to[a][b] = 1000000
-                    self.switch_to[b][a] = 1000000
-        #########################################################################################################
-        # TODO:  Update network topology and flow rules
+                    self.s_s[a][b] = 10000000
+                    self.s_s[b][a] = 10000000
+
         self.update()
-
-    def delete_forwarding_rule(self, datapath, dl_dst):
-        ofctl = OfCtl.factory(datapath, self.logger)
-
-        match = datapath.ofproto_parser.OFPMatch(dl_dst=dl_dst)
-        ofctl.delete_flow(cookie=0, priority=0, match=match)
-
-    def add_forwarding_rule(self, datapath, dl_dst, port):
-        ofctl = OfCtl.factory(datapath, self.logger)
-
-        actions = [datapath.ofproto_parser.OFPActionOutput(port)]
-        ofctl.set_flow(cookie=0, priority=0, dl_type=ether_types.ETH_TYPE_IP, dl_vlan=VLANID_NONE,
-                       dl_dst=dl_dst,
-                       actions=actions)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
-        """
-       EventHandler for PacketIn messages
-        """
+        try:
+            msg = ev.msg
+            dp = msg.datapath
+            ofctl = OfCtl.factory(dp, self.logger)
+            in_port = msg.in_port
+            pkt = packet.Packet(msg.data)
+            eth = pkt.get_protocols(ethernet.ethernet)[0]
 
-        msg = ev.msg
+            pkt_dhcp = pkt.get_protocols(dhcp.dhcp)
 
-        # In OpenFlow, switches are called "datapaths".  Each switch gets its own datapath ID.
-        # In the controller, we pass around datapath objects with metadata about each switch.
-        dp = msg.datapath
+            if not pkt_dhcp:
+                if eth.ethertype == ether_types.ETH_TYPE_ARP:
+                    arp_msg = pkt.get_protocols(arp.arp)[0]
 
-        # Use this object to create packets for the given datapath
+                    if arp_msg.opcode == arp.ARP_REQUEST:
+                        # self.logger.warning("Received ARP REQUEST on switch%d/%d:  Who has %s?  Tell %s",
+                        #                     dp.id, in_port, arp_msg.dst_ip, arp_msg.src_mac)
+                        path = self.get_path(arp_msg.src_ip, arp_msg.dst_ip)
+                        # self.logger.info('Path:%s', path)
+
+                        src_mac = self.Hip_Hmac[arp_msg.src_ip]
+                        dst_mac = self.Hip_Hmac[arp_msg.dst_ip]
+
+                        print("The distance from host_" + str(src_mac) + " to host_" + str(dst_mac) + " : " + str(
+                            len(path) + 1))
+                        s = "Path : host_"
+                        s += str(src_mac)
+                        for p in path:
+                            s += " -> switch_"
+                            s += str(p[0])
+                        s += " -> host_"
+                        s += str(dst_mac)
+                        print(s)
+                        print("\n")
+
+                        ofctl.send_arp(
+                            vlan_id=VLANID_NONE,
+                            src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
+                            dst_mac=arp_msg.src_mac,
+                            sender_ip=arp_msg.dst_ip,
+                            sender_mac=self.Hip_Hmac[arp_msg.dst_ip],
+                            target_ip=arp_msg.src_ip,
+                            target_mac=arp_msg.src_mac,
+                            output_port=self.Smac_Sport[self.Hmac_Smac[arp_msg.src_mac]],
+                            arp_opcode=2
+                        )
+                pass
+            else:
+                DHCPServer.handle_dhcp(dp, in_port, pkt)
+            return
+        except Exception as e:
+            self.logger.error(e)
+
+    def update(self):
+        self.s_s = [[1000000 for _ in range(self.switchNum + 1)] for _ in range(self.switchNum + 1)]
+
+        for i in range(1, self.switchNum + 1):
+            self.s_s[i][i] = 0
+        for key in self.mac_mac:
+            macA = key
+            macB = self.mac_mac[key]
+            a = self.Smac_Sid[macA]
+            b = self.Smac_Sid[macB]
+            self.s_s[a][b] = 1
+
+        for k in range(1, self.switchNum + 1):
+            for i in range(1, self.switchNum + 1):
+                for j in range(1, self.switchNum + 1):
+                    if self.s_s[i][k] + self.s_s[k][j] < self.s_s[i][j]:
+                        self.s_s[i][j] = self.s_s[i][k] + self.s_s[k][j]
+        self.set_flowtable()
+        self.print_path()
+
+    def add_forwarding_rule(self, dp, dl_dst, port):
         ofctl = OfCtl.factory(dp, self.logger)
+        actions = [dp.ofproto_parser.OFPActionOutput(port)]
+        ofctl.set_flow(cookie=0,
+                       priority=0,
+                       dl_type=ether_types.ETH_TYPE_IP,
+                       dl_vlan=VLANID_NONE,
+                       dl_dst=dl_dst,
+                       actions=actions)
 
-        in_port = msg.in_port
-        pkt = packet.Packet(msg.data)
-        eth = pkt.get_protocols(ethernet.ethernet)[0]
-
-        if eth.ethertype == ether_types.ETH_TYPE_ARP:
-            arp_msg = pkt.get_protocols(arp.arp)[0]
-
-            if arp_msg.opcode == arp.ARP_REQUEST:
-                self.logger.warning("Received ARP REQUEST on switch%d/%d:  Who has %s?  Tell %s",
-                                    dp.id, in_port, arp_msg.dst_ip, arp_msg.src_mac)
-                paths = self.get_path(arp_msg.src_ip, arp_msg.dst_ip)
-                self.logger.info('Path:%s',paths)
-                # TODO:  Generate a *REPLY* for this request based on your switch state
-                ofctl.send_arp(
-                    vlan_id=VLANID_NONE,
-                    src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
-                    dst_mac=arp_msg.src_mac,
-                    sender_ip=arp_msg.dst_ip,
-                    sender_mac=self.hIp_hMac[arp_msg.dst_ip],
-                    target_ip=arp_msg.src_ip,
-                    target_mac=arp_msg.src_mac,
-                    output_port=self.sMac_sPort[self.hMac_sMac[arp_msg.src_mac]],
-                    arp_opcode=2
-                )
-
-                # Here is an example way to send an ARP packet using the ofctl utilities
-                #ofctl.send_arp(vlan_id=VLANID_NONE,
-                #               src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
-                #               . . .)
-
-
-
+    def delete_forwarding_rule(self, dp, dl_dst):
+        ofctl = OfCtl.factory(dp, self.logger)
+        match = dp.ofproto_parser.OFPMatch(dl_dst=dl_dst)
+        ofctl.delete_flow(cookie=0,
+                          priority=0,
+                          match=match)
 
     def print_path(self):
         host_table = self.get_hostTable()
@@ -408,89 +249,72 @@ class ControllerApp(app_manager.RyuApp):
                         string += 'port' + str(host[2]) + '->Host-' + str(host[0]) + ' | '
                 self.logger.info(string)
 
-    def get_path(self,src_ip,dst_ip):
-        ipA = src_ip  #输入其实主机IP
-        ipB = dst_ip  #输入目的地主机IP
+    def get_path(self, src_ip, dst_ip):
+        startMac = self.Hmac_Smac[self.Hip_Hmac[src_ip]]
+        endMac = self.Hmac_Smac[self.Hip_Hmac[dst_ip]]
+        startNum = self.Smac_Sid[startMac]
+        endNum = self.Smac_Sid[endMac]
+        temp_Num = startNum
+        ans_list = []
 
-        startMac = self.hMac_sMac[self.hIp_hMac[ipA]]
-        endMac = self.hMac_sMac[self.hIp_hMac[ipB]]
-
-        startNum = self.sMac_num[startMac]
-        endNum = self.sMac_num[endMac]
-
-        nowNum = startNum
-
-        ans_list=[]
-
-        while nowNum != endNum:
-            minDistance = self.switch_to[nowNum][endNum]
-            nextNum = nowNum
-
-            outputNum = self.switch_num_real[nowNum]
+        while temp_Num != endNum:
+            minDistance = self.s_s[temp_Num][endNum]
+            nextNum = temp_Num
+            outputNum = self.switch_num_real[temp_Num]
             outputPort = -1
-
-            for mac in self.numInfo[nowNum]:
+            for mac in self.numInfo[temp_Num]:
                 if mac in self.mac_mac:
-                    tempNum = self.sMac_num[self.mac_mac[mac]]
-                    if self.switch_to[tempNum][endNum] <minDistance:
+                    tempNum = self.Smac_Sid[self.mac_mac[mac]]
+                    if self.s_s[tempNum][endNum] < minDistance:
                         nextNum = tempNum
-                        minDistance = self.switch_to[tempNum][endNum]
-                        outputPort = self.sMac_sPort[mac]
+                        minDistance = self.s_s[tempNum][endNum]
+                        outputPort = self.Smac_Sport[mac]
 
             ans_list.append((outputNum, outputPort))
-            testNum = nowNum
-            nowNum = nextNum
-            if testNum == nowNum:
+            testNum = temp_Num
+            temp_Num = nextNum
+            if testNum == temp_Num:
                 return []
 
-
         lastNum = self.switch_num_real[endNum]
-        lastPort = self.sMac_sPort[endMac]
-        ans_list.append((lastNum,lastPort))
+        lastPort = self.Smac_Sport[endMac]
+        ans_list.append((lastNum, lastPort))
         return ans_list
 
     def set_flowtable(self):
-        ipList = [] #所有ip
-        for key in self.hIp_hMac:
+        ipList = []  # 所有ip
+        for key in self.Hip_Hmac:
             ipList.append(key)
-        #任意两个ip之间都添加对应的流表
+        # 任意两个ip之间都添加对应的流表
         for ip1 in ipList:
             for ip2 in ipList:
                 if ip1 != ip2:
-                    tuple_list = self.get_path(ip1,ip2)
-                    for tuple in tuple_list:
-                        #先删除旧流表再添加流表
-                        self.delete_forwarding_rule(self.sId_sWitch[tuple[0]], self.hIp_hMac[ip2])
-                        self.add_forwarding_rule(self.sId_sWitch[tuple[0]], self.hIp_hMac[ip2], tuple[1])
+                    path_list = self.get_path(ip1, ip2)
+                    for path in path_list:
+                        # 先删除旧流表再添加流表
+                        self.delete_forwarding_rule(self.Sid_Sswitch[path[0]], self.Hip_Hmac[ip2])
+                        self.add_forwarding_rule(self.Sid_Sswitch[path[0]], self.Hip_Hmac[ip2], path[1])
 
     def get_linkTable(self):
-
         table = []
-        for i in range(self.switchNum+1):
+        for i in range(self.switchNum + 1):
             table.append([])
-
         for link in self.numInfo:
-            start = 0
             for mac in link:
                 if mac in self.mac_mac:
-                    start = self.switch_num_real[self.sMac_num[mac]]
-                    aim = self.switch_num_real[self.sMac_num[self.mac_mac[mac]]]
-                    port = self.sMac_sPort[mac]
-                    table[start].append((aim,port))
+                    start = self.switch_num_real[self.Smac_Sid[mac]]
+                    aim = self.switch_num_real[self.Smac_Sid[self.mac_mac[mac]]]
+                    port = self.Smac_Sport[mac]
+                    table[start].append([aim, port])
         return table
 
     def get_hostTable(self):
         table = []
-
-
-
-        for i in self.hIp_realNum:
-            num = self.hIp_realNum[i]
-            mac = self.hIp_hMac[i]
-            aimMac = self.hMac_sMac[mac]
-            aimFake = self.sMac_num[aimMac]
+        for i in self.Hip_Hid:
+            mac = self.Hip_Hmac[i]
+            aimMac = self.Hmac_Smac[mac]
+            aimFake = self.Smac_Sid[aimMac]
             aim = self.switch_num_real[aimFake]
-
-            port = self.sMac_sPort[aimMac]
-            table.append((i,aim,port))
+            port = self.Smac_Sport[aimMac]
+            table.append((i, aim, port))
         return table
