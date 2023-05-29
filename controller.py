@@ -12,6 +12,12 @@ from dhcp import DHCPServer
 
 from ofctl_utilis import OfCtl, VLANID_NONE
 
+# conda activate cs305
+# sudo mn -c
+# ryu-manager --observe-links controller.py
+
+# cd ./tests/switching_test/
+# sudo env "PATH=$PATH" python test_network.py # share the PATN env with sudo user
 
 class ControllerApp(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION]
@@ -21,8 +27,8 @@ class ControllerApp(app_manager.RyuApp):
         self.switchNum = 0
         self.s_s = []  # 两个switch之间的距,邻接矩阵
         self.numInfo = []
-        self.switch_num_real = {}  # 转化交换机序号为真实序号，编程用
-        self.switch_real_num = {}  # 转化交换机序号为真实序号，编程用
+        self.switch_num_real = {}  # switch id->switchNum
+        self.switch_real_num = {}  # switchNum-> switch id
         self.port = []
         self.Hip_Hmac = {}  # host ip->host mac
         self.Hmac_Smac = {}  # host mac->switch mac
@@ -41,49 +47,32 @@ class ControllerApp(app_manager.RyuApp):
         switch = ev.switch
         dp = switch.dp
         self.Sid_Sswitch[dp.id] = dp
-        self.logger.warn("Added Switch switch%d with ports:", switch.dp.id)
-
         self.switchNum += 1
         self.s_s.append([])
         self.numInfo.append([])
-
         for port in switch.ports:
-            self.logger.warn("\t%d:  %s", port.port_no, port.hw_addr)
             self.Smac_Sport[port.hw_addr] = port.port_no
             self.numInfo[self.switchNum].append(port.hw_addr)
             self.s_s[self.switchNum].append(0)
             self.Smac_Sid[port.hw_addr] = self.switchNum
-
         self.switch_real_num[switch.dp.id] = self.switchNum
         self.switch_num_real[self.switchNum] = switch.dp.id
         self.update()
 
     @set_ev_cls(event.EventSwitchLeave)
     def handle_switch_delete(self, ev):
-
         switch = ev.switch
-        self.logger.warn("Removed Switch switch%d with ports:", switch.dp.id)
-
-        for port in switch.ports:
-            self.logger.warn("\t%d:  %s", port.port_no, port.hw_addr)
-
         temp_num = self.switch_real_num[switch.dp.id]
         self.leaveSwitchList.append(temp_num)
-
         for mac in self.numInfo[temp_num]:
             if mac in self.mac_mac:
                 del self.mac_mac[self.mac_mac[mac]]
                 del self.mac_mac[mac]
-
         self.update()
 
     @set_ev_cls(event.EventHostAdd)
     def handle_host_add(self, ev):
-
         host = ev.host
-        self.logger.warn("Host Added:  %s (IPs:  %s) on switch%s/%s (%s)",
-                         host.mac, host.ipv4, host.port.dpid, host.port.port_no, host.port.hw_addr)
-
         self.Hip_Hmac[host.ipv4[0]] = host.mac
         self.Hmac_Smac[host.mac] = host.port.hw_addr
         self.Hip_Hid[host.ipv4[0]] = host.port.dpid
@@ -94,10 +83,6 @@ class ControllerApp(app_manager.RyuApp):
         link = ev.link
         src_port = link.src
         dst_port = link.dst
-        self.logger.warn("Added Link:  switch%s/%s (%s) -> switch%s/%s (%s)",
-                         src_port.dpid, src_port.port_no, src_port.hw_addr,
-                         dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
-
         self.mac_mac[src_port.hw_addr] = dst_port.hw_addr
         self.mac_mac[dst_port.hw_addr] = src_port.hw_addr
         self.update()
@@ -107,31 +92,18 @@ class ControllerApp(app_manager.RyuApp):
         link = ev.link
         src_port = link.src
         dst_port = link.dst
-
-        self.logger.warn("Deleted Link:  switch%s/%s (%s) -> switch%s/%s (%s)",
-                         src_port.dpid, src_port.port_no, src_port.hw_addr,
-                         dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
-
         if src_port.hw_addr in self.mac_mac:
             del self.mac_mac[src_port.hw_addr]
         if dst_port.hw_addr in self.mac_mac:
             del self.mac_mac[dst_port.hw_addr]
-
         self.update()
 
     @set_ev_cls(event.EventPortModify)
     def handle_port_modify(self, ev):
-
         port = ev.port
-        self.logger.warn("Port Changed:  switch%s/%s (%s):  %s",
-                         port.dpid, port.port_no, port.hw_addr,
-                         "UP" if port.is_live() else "DOWN")
-
         a = self.Smac_Sid[port.hw_addr]
-
         if port.hw_addr in self.mac_mac:
             b = self.Smac_Sid[self.mac_mac[port.hw_addr]]
-
             if port.hw_addr in self.DelPortList:
                 self.DelPortList.remove(port.hw_addr)
                 self.s_s[a][b] = 1
@@ -141,7 +113,6 @@ class ControllerApp(app_manager.RyuApp):
                 if port.hw_addr in self.mac_mac:
                     self.s_s[a][b] = 10000000
                     self.s_s[b][a] = 10000000
-
         self.update()
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -153,22 +124,14 @@ class ControllerApp(app_manager.RyuApp):
             in_port = msg.in_port
             pkt = packet.Packet(msg.data)
             eth = pkt.get_protocols(ethernet.ethernet)[0]
-
             pkt_dhcp = pkt.get_protocols(dhcp.dhcp)
-
             if not pkt_dhcp:
                 if eth.ethertype == ether_types.ETH_TYPE_ARP:
                     arp_msg = pkt.get_protocols(arp.arp)[0]
-
                     if arp_msg.opcode == arp.ARP_REQUEST:
-                        # self.logger.warning("Received ARP REQUEST on switch%d/%d:  Who has %s?  Tell %s",
-                        #                     dp.id, in_port, arp_msg.dst_ip, arp_msg.src_mac)
                         path = self.get_path(arp_msg.src_ip, arp_msg.dst_ip)
-                        # self.logger.info('Path:%s', path)
-
                         src_mac = self.Hip_Hmac[arp_msg.src_ip]
                         dst_mac = self.Hip_Hmac[arp_msg.dst_ip]
-
                         print("The distance from host_" + str(src_mac) + " to host_" + str(dst_mac) + " : " + str(
                             len(path) + 1))
                         s = "Path : host_"
@@ -179,8 +142,6 @@ class ControllerApp(app_manager.RyuApp):
                         s += " -> host_"
                         s += str(dst_mac)
                         print(s)
-                        print("\n")
-
                         ofctl.send_arp(
                             vlan_id=VLANID_NONE,
                             src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
@@ -201,7 +162,6 @@ class ControllerApp(app_manager.RyuApp):
 
     def update(self):
         self.s_s = [[1000000 for _ in range(self.switchNum + 1)] for _ in range(self.switchNum + 1)]
-
         for i in range(1, self.switchNum + 1):
             self.s_s[i][i] = 0
         for key in self.mac_mac:
@@ -210,7 +170,6 @@ class ControllerApp(app_manager.RyuApp):
             a = self.Smac_Sid[macA]
             b = self.Smac_Sid[macB]
             self.s_s[a][b] = 1
-
         for k in range(1, self.switchNum + 1):
             for i in range(1, self.switchNum + 1):
                 for j in range(1, self.switchNum + 1):
@@ -269,13 +228,11 @@ class ControllerApp(app_manager.RyuApp):
                         nextNum = tempNum
                         minDistance = self.s_s[tempNum][endNum]
                         outputPort = self.Smac_Sport[mac]
-
             ans_list.append((outputNum, outputPort))
             testNum = temp_Num
             temp_Num = nextNum
             if testNum == temp_Num:
                 return []
-
         lastNum = self.switch_num_real[endNum]
         lastPort = self.Smac_Sport[endMac]
         ans_list.append((lastNum, lastPort))

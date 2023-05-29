@@ -24,7 +24,16 @@ class Config():
     dns = '8.8.8.8' # don't modify, just for the dns entry
     start_ip = '192.168.1.2' # can be modified
     end_ip = '192.168.1.100' # can be modified
+
+    start = 2
+    end = 100
     netmask = '255.255.255.0' # can be modified
+
+
+
+    # start = 129
+    # end = 140
+    # netmask = '255.255.255.128'
 
     # You may use above attributes to configure your DHCP server.
     # You can also add more attributes like "lease_time" to support bouns function.
@@ -37,7 +46,10 @@ class DHCPServer():
     netmask = Config.netmask
     dns = Config.dns
 
-    IP_POOL = ['192.168.1.{}'.format(i) for i in range(2, 100)]
+    start = Config.start
+    end = Config.end
+
+    IP_POOL = ['192.168.1.{}'.format(i) for i in range(start, end)]
     CLIENTS = {}
 
     @classmethod
@@ -111,6 +123,122 @@ class DHCPServer():
         dhcp_option_list = [
             dhcp.option(length=4,tag=1, value=addrconv.ipv4.text_to_bin(cls.netmask)),  # Subnet mask
             dhcp.option(length=4,tag=3, value=addrconv.ipv4.text_to_bin('192.168.1.255')),  # Router
+            # dhcp.option(length=4,tag=6, value=cls.dns.encode()),  # DNS server
+            dhcp.option(length=4,tag=51, value=(3600).to_bytes(4, byteorder='big')),  # Lease time
+            dhcp.option(length=1,tag=53, value=binascii.a2b_hex("05")),  # DHCP ACK
+            # dhcp.option(length=4,tag=54, value='192.168.1.255'.encode()),  # DHCP server
+        ]
+        options = dhcp.options(
+            option_list=dhcp_option_list
+        )
+        dhcp_ack.options = options
+
+        # Generate Ethernet/IP/UDP headers
+
+        eth_pkt = ethernet.ethernet(
+            dst=pkt_ethernet.src,
+            src=cls.hardware_addr,
+            ethertype=0x0800
+        )
+        ip_pkt = ipv4.ipv4(
+            dst="0.0.0.0",
+            src='192.168.1.255',
+            proto=17,
+            option=None,
+        )
+        udp_pkt = udp.udp(
+            dst_port=68,
+            src_port=67
+        )
+
+        # Assemble the packet
+        ack_packet = packet.Packet()
+        ack_packet.add_protocol(eth_pkt)
+        ack_packet.add_protocol(ip_pkt)
+        ack_packet.add_protocol(udp_pkt)
+        ack_packet.add_protocol(dhcp_ack)
+
+        return ack_packet
+
+    @classmethod
+    def no_ip_offer(cls, pkt, ip):
+        # TODO: Generate DHCP ACK packet here
+        pkt_ethernet = pkt.get_protocols(ethernet.ethernet)[0]
+        # pkt_ipv4 = pkt.get_protocols(ipv4.ipv4)[0]
+        pkt_dhcp = pkt.get_protocols(dhcp.dhcp)[0]
+        # pkt_udp = pkt.get_protocols(udp.udp)[0]
+
+        # Generate DHCP OFFER packet
+        dhcp_ack = dhcp.dhcp(
+            op=2,                       # BOOTREPLY
+            htype=1,                    # Ethernet
+            xid=pkt_dhcp.xid,
+            yiaddr=ip,                  # Offered IP address
+            chaddr=pkt_ethernet.src,
+            hops=1,
+        )
+        
+        dhcp_option_list = [
+            dhcp.option(length=4,tag=1, value=ip.encode()),  # Subnet mask
+            dhcp.option(length=4,tag=3, value='192.168.1.255'.encode()),  # Router
+            # dhcp.option(length=4,tag=6, value=cls.dns.encode()),  # DNS server
+            dhcp.option(length=4,tag=51, value=(3600).to_bytes(4, byteorder='big')),  # Lease time
+            dhcp.option(length=1,tag=53, value=binascii.a2b_hex("02")),  # DHCP ACK
+            # dhcp.option(length=4,tag=54, value='192.168.1.255'.encode()),  # DHCP server
+        ]
+        options = dhcp.options(
+            option_list=dhcp_option_list
+        )
+        dhcp_ack.options = options
+
+        # Generate Ethernet/IP/UDP headers
+
+        eth_pkt = ethernet.ethernet(
+            dst=pkt_ethernet.src,
+            src=cls.hardware_addr,
+            ethertype=0x0800
+        )
+        ip_pkt = ipv4.ipv4(
+            dst="0.0.0.0",
+            src='192.168.1.255',
+            proto=17,
+            option=None,
+        )
+        udp_pkt = udp.udp(
+            dst_port=68,
+            src_port=67
+        )
+
+        # Assemble the packet
+        ack_packet = packet.Packet()
+        ack_packet.add_protocol(eth_pkt)
+        ack_packet.add_protocol(ip_pkt)
+        ack_packet.add_protocol(udp_pkt)
+        ack_packet.add_protocol(dhcp_ack)
+
+        return ack_packet
+
+    @classmethod
+    def no_ip_ack(cls, pkt, ip):
+        # TODO: Generate DHCP ACK packet here
+        pkt_ethernet = pkt.get_protocols(ethernet.ethernet)[0]
+        # pkt_ipv4 = pkt.get_protocols(ipv4.ipv4)[0]
+        pkt_dhcp = pkt.get_protocols(dhcp.dhcp)[0]
+        # pkt_udp = pkt.get_protocols(udp.udp)[0]
+
+        # Generate DHCP OFFER packet
+        dhcp_ack = dhcp.dhcp(
+            op=2,                       # BOOTREPLY
+            htype=1,                    # Ethernet
+            xid=pkt_dhcp.xid,
+            yiaddr=ip,                  # Offered IP address
+            chaddr=pkt_ethernet.src,
+            hops=1,
+        )
+        
+        dhcp_option_list = [
+            dhcp.option(length=4,tag=1, value=ip.encode()),  # Subnet mask
+            dhcp.option(length=4,tag=3, value='192.168.1.255'.encode()),  # Router
             # dhcp.option(length=4,tag=6, value=cls.dns.encode()),  # DNS server
             dhcp.option(length=4,tag=51, value=(3600).to_bytes(4, byteorder='big')),  # Lease time
             dhcp.option(length=1,tag=53, value=binascii.a2b_hex("05")),  # DHCP ACK
@@ -223,24 +351,32 @@ class DHCPServer():
             for i in pkt_dhcp.options.option_list:
                 if i.tag == 50:
                     assigned_ip = socket.inet_ntoa(i.value)
-         
+            print(assigned_ip)
             # Client has already been assigned the requested IP address or request
             if client_mac in cls.CLIENTS:
                 print("============ sending ack packets ============")
                 res = cls.assemble_ack(pkt, assigned_ip)
-            else: 
+            elif(assigned_ip == '192.168.1.1'): 
+                pass
+                res = cls.no_ip_ack(pkt,'192.168.1.1')
+            else:
                 print("============ sending nak packets ============")
                 res = cls.assemble_nak(pkt)
             cls._send_packet(datapath, port, res)
  
         elif(type_msg == b'\x01'):
-
             # Assign a new IP address to the client
-            assigned_ip = cls.IP_POOL.pop(0)
-            cls.CLIENTS[client_mac] = assigned_ip
-            print("============== send offer ==============")
-            res = cls.assemble_offer(pkt, assigned_ip)
-            cls._send_packet(datapath, port, res)
+            if (len(cls.IP_POOL) != 0):
+                assigned_ip = cls.IP_POOL.pop(0)
+                cls.CLIENTS[client_mac] = assigned_ip
+                print("============== send offer ==============")
+                res = cls.assemble_offer(pkt, assigned_ip)
+                cls._send_packet(datapath, port, res)
+            else:
+                pass
+                res = cls.no_ip_offer(pkt, '192.168.1.1')
+                cls._send_packet(datapath, port, res)
+           
         else:
             print(type_msg)
 
