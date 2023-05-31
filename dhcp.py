@@ -25,15 +25,15 @@ class Config():
     start_ip = '192.168.1.2' # can be modified
     end_ip = '192.168.1.100' # can be modified
 
-    start = 2
-    end = 100
-    netmask = '255.255.255.0' # can be modified
+    # start = 2
+    # end = 100
+    # netmask = '255.255.255.0' # can be modified
 
 
 
-    # start = 129
-    # end = 140
-    # netmask = '255.255.255.128'
+    start = 129
+    end = 140
+    netmask = '255.255.255.128'
 
     # You may use above attributes to configure your DHCP server.
     # You can also add more attributes like "lease_time" to support bouns function.
